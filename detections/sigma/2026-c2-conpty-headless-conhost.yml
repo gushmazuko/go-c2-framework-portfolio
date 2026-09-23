@@ -1,0 +1,31 @@
+title: Headless ConPTY Conhost Spawned by C2 Agent
+id: a1307089-bcd9-4800-982f-dd3926f1f072
+status: experimental
+description: >
+  The framework's interactive shell uses CreatePseudoConsole (ConPTY),
+  which makes Windows spawn a headless conhost.exe under the agent — an
+  unusual parent for a console host and a strong T1059.003 signal.
+  Fire conditions are kept broad on purpose: some Windows builds attach
+  the pseudoconsole host with a --headless command line, others reuse the
+  system conhost.
+references:
+  - https://github.com/gushmazuko/go-c2-framework-portfolio
+author: gushmazuko
+date: 2026-09-02
+tags:
+  - attack.execution
+  - attack.t1059.003
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_conhost:
+    Image|endswith: \conhost.exe
+  selection_parent:
+    ParentImage|endswith: \rat-agent.exe
+  selection_headless:
+    CommandLine|contains: --headless
+  condition: selection_conhost and (selection_parent or selection_headless)
+falsepositives:
+  - Legitimate pseudoconsole users (VS Code terminals, Windows Terminal previews) — correlate parent.
+level: medium

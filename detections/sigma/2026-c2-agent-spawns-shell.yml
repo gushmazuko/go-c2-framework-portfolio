@@ -1,0 +1,33 @@
+title: C2 Agent Spawns Command Shell
+id: 90120763-6b76-4850-aedf-a6a2d57e7d28
+status: experimental
+description: >
+  cmd.exe, powershell.exe or pwsh.exe with rat-agent.exe as the direct
+  parent — the process tree of the framework's exec task (T1059) and of
+  any shell-backed scenario procedure. A user-initiated tree looks
+  different (explorer/terminal ancestry), which makes the parent link the
+  detection value here.
+references:
+  - https://github.com/gushmazuko/go-c2-framework-portfolio
+author: gushmazuko
+date: 2026-09-02
+tags:
+  - attack.execution
+  - attack.t1059
+  - attack.t1059.001
+  - attack.t1059.003
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_parent:
+    ParentImage|endswith: \rat-agent.exe
+  selection_shell:
+    Image|endswith:
+      - \cmd.exe
+      - \powershell.exe
+      - \pwsh.exe
+  condition: selection_parent and selection_shell
+falsepositives:
+  - Rare by construction (agent as parent); a wrapper script spawning shells under the agent would also fire.
+level: high

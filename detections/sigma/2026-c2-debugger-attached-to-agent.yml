@@ -1,0 +1,38 @@
+title: Debugger Attached to C2 Agent (T1622 Validation)
+id: 89ad0503-542d-499e-ab0a-3daa753b65c7
+status: experimental
+description: >
+  A debugger-class tool opening the rat-agent process (Sysmon event 10).
+  This is the validation signal for scenario SC-12: the agent implements
+  T1622 debugger-evasion checks and self-exits when a debugger attaches,
+  so the observable chain is "ProcessAccess by a debugger, then agent
+  process termination". On EDR/ETW-TI telemetry the agent-side API reads
+  (IsDebuggerPresent / NtQueryInformationProcess debug-port/flags) are
+  additionally visible — classic Sysmon does not see those; see
+  detections/playbooks/T1622-anti-debug.md.
+references:
+  - https://github.com/gushmazuko/go-c2-framework-portfolio
+author: gushmazuko
+date: 2026-09-02
+tags:
+  - attack.defense-evasion
+  - attack.t1622
+logsource:
+  category: process_access
+  product: windows
+detection:
+  selection_target:
+    TargetImage|endswith: \rat-agent.exe
+  selection_sources:
+    SourceImage|endswith:
+      - \windbg.exe
+      - \x64dbg.exe
+      - \x32dbg.exe
+      - \cdb.exe
+      - \ollydbg.exe
+      - \cheatengine-x86_64.exe
+      - \debug-probe.exe
+  condition: selection_target and selection_sources
+falsepositives:
+  - None expected; debug-probe.exe is the range's own test debugger (debug-probe).
+level: high

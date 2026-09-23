@@ -1,0 +1,28 @@
+title: C2 Agent Binary Execution (rat-agent)
+id: 850978ed-7dda-4075-8f9e-6e2401e1a1d3
+status: experimental
+description: >
+  The go-c2-framework agent executing on an endpoint. Release builds are
+  GUI-subsystem and fully silent (no console banner, no file logging), so
+  the process-creation event is usually the only process-level visibility
+  of the implant itself. Lab twin of technique coverage in
+  detections/mappings.yaml (capability: agent-execution).
+references:
+  - https://github.com/gushmazuko/go-c2-framework-portfolio
+author: gushmazuko
+date: 2026-09-02
+tags:
+  - attack.execution
+  - attack.command-and-control
+  - attack.t1059
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection:
+    Image|endswith: \rat-agent.exe
+  condition: selection
+falsepositives:
+  - The range VM itself (C:\\labs\rat-agent.exe is the lab deployment path).
+  - An operator binary named identically.
+level: high

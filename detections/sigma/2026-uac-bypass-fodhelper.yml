@@ -1,0 +1,28 @@
+title: UAC Bypass via ms-settings Hijack (fodhelper/eventvwr)
+id: 9e938f81-591b-4a41-bbef-a6023ff333ab
+status: experimental
+description: >
+  Registry writes to the HKCU ms-settings ShellOpen/command hijack point
+  used by fodhelper.exe and eventvwr.exe UAC bypasses — the elevation
+  procedure of scenario SC-11 (T1548.002), executed through the framework
+  shell.
+references:
+  - https://github.com/gushmazuko/go-c2-framework-portfolio
+author: gushmazuko
+date: 2026-09-02
+tags:
+  - attack.privilege-escalation
+  - attack.defense-evasion
+  - attack.t1548.002
+logsource:
+  category: registry_set
+  product: windows
+detection:
+  selection_command:
+    TargetObject|contains: \ms-settings\Shell\Open\command
+  selection_delegate:
+    TargetObject|contains: \ms-settings\DelegateExecute
+  condition: 1 of selection_*
+falsepositives:
+  - None commonly observed; retail-demo and settings-troubleshooting tools are the edge cases.
+level: high

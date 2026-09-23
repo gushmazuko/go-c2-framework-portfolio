@@ -1,0 +1,31 @@
+title: Scheduled Task Creation via schtasks
+id: aafc7c24-3591-4fdd-8777-ddba04701ed6
+status: experimental
+description: >
+  schtasks creating or modifying a task — the persistence procedure of
+  scenario SC-02 (T1053.005), executed through the framework shell. On
+  this range the action line is typically a powershell/cmd one-liner; note
+  the lab quirk that .bat actions silently do not execute on the test VM.
+references:
+  - https://github.com/gushmazuko/go-c2-framework-portfolio
+author: gushmazuko
+date: 2026-09-02
+tags:
+  - attack.persistence
+  - attack.privilege-escalation
+  - attack.execution
+  - attack.t1053.005
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_img:
+    Image|endswith: \schtasks.exe
+    CommandLine|contains:
+      - /create
+      - /change
+      - /run
+  condition: selection_img
+falsepositives:
+  - Software installers and admin scripts create tasks routinely; correlate with the C2 shell parent (2026-c2-agent-spawns-shell.yml).
+level: medium

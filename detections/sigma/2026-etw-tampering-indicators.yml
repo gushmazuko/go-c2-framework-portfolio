@@ -1,0 +1,32 @@
+title: ETW Tampering Indicators in PowerShell Command Line
+id: 5c3ba4c2-0018-4116-8906-e97d547ec244
+status: experimental
+description: >
+  Command-line markers of ETW blinding (T1562.002) — public atomics patch
+  EtwEventWrite / unregister providers by name. As with AMSI: the
+  in-memory patch itself is invisible to classic Sysmon; this rule sees
+  the script-string variants, and the EDR-side hunt lives in
+  detections/playbooks/T1562.002-etw-blinding.md. Scenario: SC-07,
+  executed through the framework shell.
+references:
+  - https://github.com/gushmazuko/go-c2-framework-portfolio
+author: gushmazuko
+date: 2026-09-02
+tags:
+  - attack.defense-evasion
+  - attack.t1562.002
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection:
+    Image|endswith:
+      - \powershell.exe
+      - \pwsh.exe
+    CommandLine|contains:
+      - EtwEventWrite
+      - EtwEventUnregister
+  condition: selection
+falsepositives:
+  - ETW diagnostic tooling referencing provider names in legitimate scripts.
+level: high

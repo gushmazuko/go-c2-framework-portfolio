@@ -1,0 +1,104 @@
+<!--
+  sysmon-lab-config.xml — reference Sysmon configuration for the
+  go-c2-framework range VM (RANGE-VM).
+
+  This is a LAB config: broad includes, minimal excludes, tuned to make
+  the detections/ Sigma rules fire without drowning in Windows 11 noise.
+  For production you would start from a community config (SwiftOnSecurity
+  sysmon-config or olafhartong sysmon-modular) and layer these events on.
+
+  Install:
+    sysmon64.exe -accepteula -i sysmon-lab-config.xml
+  Update:
+    sysmon64.exe -c sysmon-lab-config.xml
+
+  Events collected here:
+    1  ProcessCreate        (hashes + full command line)  — T1059 chains
+    3  NetworkConnect       (no host-level filtering)     — beacon/transport
+    7  ImageLoad            (module loads)                — amsi/ETW tamper context
+    10 ProcessAccess        (open-process telemetry)      — T1622 validation, T1055 context
+    11 FileCreate           (raw access)                  — transfer spool, staging
+    12 RegistryObjectCreateDelete                         — Run key artifacts
+    13 RegistryValueSet                                   — Run key, UAC-bypass hijack
+    22 DnsQuery                                           — beacon hostname resolution
+-->
+
+<Sysmon schemaversion="4.91">
+  <!-- NOTE: no <Hashes> element — Sysmon 15.21 fast-fails (0xC0000409) on
+       it in any form (bisected live on the range VM); the default hash
+       set already includes SHA256. Condition syntax is Sysmon's
+       ("end with", not Sigma's "endswith"). -->
+  <EventFiltering>
+
+    <!-- ==================== 1: ProcessCreate ==================== -->
+    <RuleGroup name="process_create" groupRelation="or">
+      <ProcessCreate onmatch="exclude">
+        <!-- keep the lab noisy on purpose; drop only the loudest
+             per-boot noise so event 1 stays usable -->
+        <ParentImage condition="is">C:\Windows\system32\wbem\wmiprvse.exe</ParentImage>
+      </ProcessCreate>
+    </RuleGroup>
+
+    <!-- ==================== 3: NetworkConnect ==================== -->
+    <RuleGroup name="network_connect" groupRelation="or">
+      <NetworkConnect onmatch="exclude">
+        <Image condition="begin with">C:\Windows\system32\svchost.exe</Image>
+        <Image condition="begin with">C:\Windows\System32\smartscreen.exe</Image>
+        <!-- rely on the SIEM to aggregate agent periodicity; raw events stay -->
+      </NetworkConnect>
+    </RuleGroup>
+
+    <!-- ==================== 7: ImageLoad ==================== -->
+    <RuleGroup name="image_load" groupRelation="or">
+      <ImageLoad onmatch="exclude">
+        <!-- signed-Microsoft loads are the bulk of event 7 noise -->
+        <Signed condition="is">true</Signed>
+      </ImageLoad>
+    </RuleGroup>
+
+    <!-- ==================== 10: ProcessAccess ==================== -->
+    <RuleGroup name="process_access" groupRelation="or">
+      <ProcessAccess onmatch="include">
+        <!-- validation signal for SC-12/T1622: a debugger tool opening
+             the agent; and generic cross-process access for T1055 context -->
+        <TargetImage condition="end with">rat-agent.exe</TargetImage>
+        <TargetImage condition="end with">notepad.exe</TargetImage>
+        <SourceImage condition="end with">powershell.exe</SourceImage>
+      </ProcessAccess>
+    </RuleGroup>
+
+    <!-- ==================== 11: FileCreate ==================== -->
+    <RuleGroup name="file_create" groupRelation="or">
+      <FileCreate onmatch="exclude">
+        <!-- browser + OS cache churn; keep transfer spool and staging writes -->
+        <Image condition="begin with">C:\Program Files\Microsoft\</Image>
+        <Image condition="begin with">C:\Windows\System32\svchost.exe</Image>
+      </FileCreate>
+    </RuleGroup>
+
+    <!-- ============ 12/13: Registry events ============ -->
+    <RuleGroup name="registry_run_keys" groupRelation="or">
+      <RegistryEvent onmatch="include">
+        <!-- T1547.001 Run keys (SC-03). "contains" without the hive
+             prefix on purpose: Sysmon renders HKCU writes as
+             HKU\<SID>\... , so begin-with-HKCU never matches. -->
+        <TargetObject condition="contains">\SOFTWARE\Microsoft\Windows\CurrentVersion\Run</TargetObject>
+        <!-- T1548.002 UAC bypass hijack point (SC-11). NOTE: the real
+             path is Shell\Open\command (three segments) — ShellOpen
+             does not exist and never fires. -->
+        <TargetObject condition="contains">\ms-settings\Shell\Open\command</TargetObject>
+        <TargetObject condition="contains">\ms-settings\DelegateExecute</TargetObject>
+        <!-- T1053.005 schtasks bookkeeping (SC-02) -->
+        <TargetObject condition="begin with">HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\TaskCache</TargetObject>
+      </RegistryEvent>
+    </RuleGroup>
+
+    <!-- ==================== 22: DnsQuery ==================== -->
+    <RuleGroup name="dns_query" groupRelation="or">
+      <DnsQuery onmatch="exclude">
+        <Image condition="end with">svchost.exe</Image>
+      </DnsQuery>
+    </RuleGroup>
+
+  </EventFiltering>
+</Sysmon>

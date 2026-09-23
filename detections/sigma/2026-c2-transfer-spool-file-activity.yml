@@ -1,0 +1,28 @@
+title: C2 Agent Transfer Spool File Activity
+id: 13bbd85b-a3c5-4bb2-9afc-be03d28a1e45
+status: experimental
+description: >
+  File activity of the framework's transfer path (T1105). Uploads spool
+  to a hidden temp file named .rat-upload-<random> next to the target and
+  are atomically renamed on completion — the hidden-dot name is the
+  primary selection. Any file create by rat-agent.exe itself (download
+  output, upload spool) is the secondary one.
+references:
+  - https://github.com/gushmazuko/go-c2-framework-portfolio
+author: gushmazuko
+date: 2026-09-02
+tags:
+  - attack.command-and-control
+  - attack.t1105
+logsource:
+  category: file_event
+  product: windows
+detection:
+  selection_spool:
+    TargetFilename|contains: .rat-upload-
+  selection_agent:
+    Image|endswith: \rat-agent.exe
+  condition: selection_spool or selection_agent
+falsepositives:
+  - On the range VM every agent-side file activity fires; scope by TargetFilename for tighter signal.
+level: medium

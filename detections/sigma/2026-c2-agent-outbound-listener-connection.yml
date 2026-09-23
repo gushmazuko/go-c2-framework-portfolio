@@ -1,0 +1,28 @@
+title: C2 Agent Outbound Connection to Listener
+id: 3a366c73-e4c3-4323-9855-eb0fcef7a690
+status: experimental
+description: >
+  rat-agent.exe opening any network connection. Both framework transports
+  surface here: the persistent mTLS session (one long-lived connection,
+  T1095) and the HTTPS beacon (one short exchange per poll cycle,
+  T1071.001/T1029). This rule is also the base rule for the beacon
+  periodicity correlation (2026-c2-beacon-periodicity.yml).
+references:
+  - https://github.com/gushmazuko/go-c2-framework-portfolio
+author: gushmazuko
+date: 2026-09-02
+tags:
+  - attack.command-and-control
+  - attack.t1095
+  - attack.t1071.001
+  - attack.t1029
+logsource:
+  category: network_connection
+  product: windows
+detection:
+  selection:
+    Image|endswith: \rat-agent.exe
+  condition: selection
+falsepositives:
+  - None on a non-range endpoint; on the range VM this is the instrument firing.
+level: high

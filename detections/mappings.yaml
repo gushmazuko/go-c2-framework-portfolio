@@ -1,0 +1,251 @@
+# ATT&CK mapping for the go-c2-framework range.
+#
+# Three tiers:
+#   framework_native         — implant capabilities, exercised live by the agent itself
+#   scenario_backed          — procedures run through the framework shell (scenarios/ runbooks)
+#   documented_not_exercised — architectural evasion families; detection playbooks only,
+#                              no open procedure reproduces their artifacts (finalization-plan §6)
+#
+# Ground truth for every mapping is the server's SQLite audit log
+# (tasks.attack_tag / transfers.attack_tag), so an engagement replay lists
+# exactly which techniques were exercised and what the SIEM should have seen.
+meta:
+  project: go-c2-framework
+  mapping_version: 1
+  updated: "2026-09-02"
+  attack_version: v15
+  ground_truth: "SQLite audit: data/c2server.db (tasks, transfers, sessions)"
+  scope_note: >
+    Server = linux/amd64 (operator side), agent = windows/amd64 (range
+    host). Detections here target the Windows endpoint unless noted.
+
+framework_native:
+
+  - capability: agent-execution
+    description: rat-agent.exe started on the target (ssh, manual, or delivery)
+    attack: [T1059]            # the start itself is operator-driven; see also T1204 if user-launched
+    host_artifacts:
+      - "ProcessCreate: C:\\labs\\rat-agent.exe (console/debug builds write a banner; release builds are GUI-subsystem and silent)"
+      - "ImageLoad: rat-agent.exe loading crypt32/BCrypt TLS stack modules at startup"
+    network_artifacts:
+      - "Outbound TLS 1.3 to the listener; Go crypto stack TLS fingerprint"
+    detections:
+      - sigma/2026-c2-agent-binary-execution.yml
+      - sigma/2026-c2-agent-outbound-listener-connection.yml
+    exercised: live
+
+  - capability: session-mtls-persistent
+    description: one long-lived mutually-authenticated TLS connection; task loop over it
+    attack: [T1095]            # Non-Application Layer Protocol (custom binary framing inside TLS)
+    host_artifacts:
+      - "NetworkConnect: long-lived TCP session, no user-context browser lineage"
+    network_artifacts:
+      - "TLS 1.3-only, client-cert handshake; frames are length-prefixed JSON + binary chunks"
+    detections:
+      - sigma/2026-c2-agent-outbound-listener-connection.yml
+    exercised: live
+
+  - capability: session-https-beacon
+    description: periodic HTTPS poll (sleep ± jitter), tasks/results batched per cycle
+    attack: [T1071.001, T1029] # Web Protocols; Scheduled Transfer
+    host_artifacts:
+      - "NetworkConnect: short POST /beacon exchanges at a regular cadence"
+    network_artifacts:
+      - "Beacon periodicity (interval ± jitter percent); Connection: close per response"
+    detections:
+      - sigma/2026-c2-agent-outbound-listener-connection.yml
+      - sigma/2026-c2-beacon-periodicity.yml
+    exercised: live
+
+  - capability: exec
+    description: server-issued command execution (cmd / powershell / sh per agent report)
+    attack: [T1059, T1059.003, T1059.001]
+    host_artifacts:
+      - "ProcessCreate: cmd.exe or powershell.exe with rat-agent.exe as parent"
+      - "audit log: tasks row attack_tag=T1059"
+    network_artifacts:
+      - "command_output chunks riding the session transport"
+    detections:
+      - sigma/2026-c2-agent-spawns-shell.yml
+    exercised: live
+
+  - capability: shell-conpty
+    description: interactive ConPTY shell (cmd/powershell), resize + reattach
+    attack: [T1059.003]        # Windows Command Shell
+    host_artifacts:
+      - "ProcessCreate: conhost.exe spawned headless by rat-agent.exe (pseudoconsole)"
+      - "cmd.exe / powershell.exe under rat-agent.exe"
+    network_artifacts:
+      - "interactive keystroke-sized uplink bursts instead of task batches"
+    detections:
+      - sigma/2026-c2-agent-spawns-shell.yml
+      - sigma/2026-c2-conpty-headless-conhost.yml
+    exercised: live
+
+  - capability: download
+    description: server pulls a file from the agent (chunked, resumable)
+    attack: [T1005, T1105]     # collecting data from the endpoint (audit tags T1005);
+                               # the C2 transport leg is T1105
+    host_artifacts:
+      - "FileOpen/read of the source file; chunk spool under data/transfers/<id>/ on the SERVER"
+      - "audit log: transfers row direction=download attack_tag=T1005"
+    network_artifacts:
+      - "binary chunk frames; sustained uplink volume from the agent"
+    detections:
+      - sigma/2026-c2-transfer-spool-file-activity.yml
+    exercised: live
+
+  - capability: upload
+    description: server pushes a file to the agent (temp spool + atomic rename)
+    attack: [T1105]            # Ingress Tool Transfer (audit tags T1105)
+    host_artifacts:
+      - "FileCreate: .rat-upload-<random> next to the target path, then rename to the final name"
+      - "persistent transport only — uploads over the https beacon are rejected by design"
+    network_artifacts:
+      - "sustained downlink volume to the agent on a live connection"
+    detections:
+      - sigma/2026-c2-transfer-spool-file-activity.yml
+    exercised: live
+
+  - capability: anti-debug
+    description: agent checks for user-mode debuggers at startup and every 30s; self-exits on a positive
+    attack: [T1622]            # Debugger Evasion (owner scope decision 2026-09-02)
+    host_artifacts:
+      - "API calls: IsDebuggerPresent, CheckRemoteDebuggerPresent, NtQueryInformationProcess(ProcessDebugPort/ProcessDebugFlags)"
+      - "visible only to EDR/ETW-TI class telemetry — classic Sysmon does not log these reads"
+      - "symptom: agent process exits with code 0 while a debugger is attached"
+    network_artifacts:
+      - "none by design (silent exit, no indicator sent)"
+    detections:
+      - sigma/2026-c2-debugger-attached-to-agent.yml
+      - "playbooks/T1622-anti-debug.md"
+    exercised: live            # validated via debug-probe, scenario SC-12
+
+  - capability: task-queue
+    description: tasks issued to a disconnected (beacon) session queue server-side with TTL
+    attack: []                 # operator-side mechanics; no host artifact on the endpoint
+    host_artifacts: []
+    network_artifacts: []
+    detections: []
+    exercised: live
+
+  - capability: audit-trail
+    description: SQLite persistence of sessions/tasks/transfers with ATT&CK tags
+    attack: []                 # ground truth source, not an endpoint behavior
+    host_artifacts: []
+    network_artifacts: []
+    detections: []
+    exercised: live
+
+scenario_backed:
+  # Each entry is executed as documented procedure steps through the
+  # framework shell; see the referenced scenario runbook. Detections pair
+  # 1:1 with the scenario's expected-fire list.
+
+  - capability: discovery-chain
+    scenario: scenarios/SC-01-discovery-chain.md
+    attack: [T1082, T1033, T1087.001, T1083]
+    detections:
+      - sigma/2026-c2-agent-spawns-shell.yml
+    exercised: live
+
+  - capability: persistence-schtasks
+    scenario: scenarios/SC-02-persistence-schtasks.md
+    attack: [T1053.005]
+    detections:
+      - sigma/2026-schtask-creation-suspicious.yml
+    exercised: live
+
+  - capability: persistence-run-key
+    scenario: scenarios/SC-03-persistence-run-key.md
+    attack: [T1547.001]
+    detections:
+      - sigma/2026-run-key-persistence.yml
+    exercised: live
+
+  - capability: lolbin-execution
+    scenario: scenarios/SC-04-lolbin-execution.md
+    attack: [T1105, T1218.005, T1218.011]
+    detections:
+      - sigma/2026-lolbin-certutil-download.yml
+    exercised: live
+
+  - capability: data-staging-exfil
+    scenario: scenarios/SC-05-data-staging-exfil.md
+    attack: [T1074.001, T1105]
+    detections:
+      - sigma/2026-c2-transfer-spool-file-activity.yml
+    exercised: live
+
+  - capability: amsi-patching
+    scenario: scenarios/SC-06-amsi-patching.md
+    attack: [T1562.001]
+    detections:
+      - sigma/2026-amsi-tampering-indicators.yml
+      - "playbooks/T1562.001-amsi-patching.md"
+    exercised: live
+
+  - capability: etw-blinding
+    scenario: scenarios/SC-07-etw-blinding.md
+    attack: [T1562.002]
+    detections:
+      - sigma/2026-etw-tampering-indicators.yml
+      - "playbooks/T1562.002-etw-blinding.md"
+    exercised: live
+
+  - capability: process-injection
+    scenario: scenarios/SC-08-process-injection.md
+    attack: [T1055]
+    detections:
+      - "playbooks/T1055-process-injection.md"   # classic Sysmon sees little; EDR/ETW-TI territory
+    exercised: live
+
+  - capability: obfuscation
+    scenario: scenarios/SC-09-obfuscation.md
+    attack: [T1027, T1027.013]
+    detections:
+      - "playbooks/T1027-obfuscation.md"
+    exercised: live
+
+  - capability: token-manipulation
+    scenario: scenarios/SC-10-token-manipulation.md
+    attack: [T1134]
+    detections:
+      - "playbooks/T1134-token-manipulation.md"
+    exercised: live
+
+  - capability: uac-bypass
+    scenario: scenarios/SC-11-uac-bypass.md
+    attack: [T1548.002]
+    detections:
+      - sigma/2026-uac-bypass-fodhelper.yml
+      - "playbooks/T1548.002-uac-bypass.md"
+    exercised: live
+
+  - capability: anti-debug-validation
+    scenario: scenarios/SC-12-antidebug-validation.md
+    attack: [T1622]
+    detections:
+      - sigma/2026-c2-debugger-attached-to-agent.yml
+      - "playbooks/T1622-anti-debug.md"
+    exercised: live
+
+documented_not_exercised:
+  # Architectural evasion families: no open procedure reproduces their
+  # artifacts, so this range cannot exercise them without implementing the
+  # technique in the implant — which it declines (finalization-plan §6).
+  # Each ships a detection playbook describing what defenders should hunt
+  # for in EDR/memory telemetry regardless.
+
+  - family: sleep-obfuscation
+    playbook: playbooks/architectural-evasion-families.md#sleep-obfuscation
+    attack: []                 # no stable ATT&CK ID; T1027-adjacent (memory encryption vs scanners)
+    note: memory-scan signatures of sleep-time encryption, thread-context anomalies
+  - family: direct-indirect-syscalls
+    playbook: playbooks/architectural-evasion-families.md#direct-indirect-syscalls
+    attack: [T1106]            # adjacent: Native API abuse without hooked-API traces
+    note: syscall-from-unbacked-memory heuristics, missing hooked-API frames in call stacks
+  - family: implant-integrated-injection
+    playbook: playbooks/architectural-evasion-families.md#implant-integrated-injection
+    attack: [T1055]            # T1055 family, but the integrated (not procedural) variant
+    note: call-stack/parent-child anomalies; loader-less allocation patterns
